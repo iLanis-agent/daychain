@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DayChain</title>
+<style>
+  :root { --bg:#f4f6f8; --card:#fff; --ink:#222831; --muted:#7d8792; --blue:#3568b8; --green:#3d8a4f; --amber:#c98a1e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:ui-sans-serif,system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:20px 24px 8px; }
+  h1 { margin:0; font-size:1.5rem; }
+  .sub { color:var(--muted); margin:4px 0 0; font-size:.9rem; }
+  main { max-width:720px; margin:0 auto; padding:12px 16px 40px; }
+  form { display:flex; gap:8px; margin-bottom:14px; }
+  input, button { font:inherit; padding:8px 12px; border:1px solid #d3dae2; border-radius:8px; background:#fff; }
+  input[type=text] { flex:1; }
+  button { background:var(--blue); color:#fff; border:none; cursor:pointer; }
+  button.ghost { background:#e8edf3; color:var(--ink); }
+  .card { background:var(--card); border-radius:12px; padding:14px 16px; margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  .name { font-weight:600; font-size:1.05rem; }
+  .streak { font-size:1.6rem; font-weight:800; color:var(--blue); }
+  .streak.dead { color:#b8c0c9; }
+  .unit { font-size:.8rem; color:var(--muted); font-weight:400; }
+  .meta { font-size:.82rem; color:var(--muted); margin-top:2px; }
+  .risk { background:#fbf0da; color:#9a6b12; font-size:.75rem; font-weight:700; padding:3px 10px; border-radius:999px; }
+  .done { background:#e0f0e2; color:#2e6b2e; font-size:.75rem; font-weight:700; padding:3px 10px; border-radius:999px; }
+  .week { display:flex; gap:5px; margin-top:10px; }
+  .day { flex:1; max-width:44px; text-align:center; font-size:.68rem; color:var(--muted); }
+  .day .dot { height:26px; border-radius:8px; background:#e8edf3; margin-bottom:3px; display:flex; align-items:center; justify-content:center; font-size:.8rem; }
+  .day.on .dot { background:var(--green); color:#fff; }
+  .actions { display:flex; gap:8px; margin-top:12px; }
+  .actions button { padding:7px 14px; font-size:.85rem; }
+  .empty { text-align:center; color:var(--muted); padding:40px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DayChain</h1>
+  <p class="sub">Don't break the chain. Check in daily; your streak stays alive until you miss a full day.</p>
+</header>
+<main>
+  <form id="add-form">
+    <input type="text" id="f-name" placeholder="New habit (e.g. Read 20 min, No sugar)" maxlength="40" required>
+    <button type="submit">Add habit</button>
+  </form>
+  <div id="list"></div>
+</main>
+<script src="engine.js"></script>
+<script>
+(function () {
+  var KEY = 'daychain-v1';
+  var DAYMS = 86400000;
+  function today() { return new Date().toISOString().slice(0, 10); }
+  function minusDays(date, n) { return new Date(new Date(date + 'T00:00:00Z').getTime() - n * DAYMS).toISOString().slice(0, 10); }
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+  function save() { localStorage.setItem(KEY, JSON.stringify(habits)); }
+  var habits = load();
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  var DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+  function render() {
+    var wrap = document.getElementById('list');
+    wrap.innerHTML = '';
+    if (!habits.length) {
+      wrap.innerHTML = '<div class="empty">No habits yet. Add one small thing you want to do daily.</div>';
+      return;
+    }
+    var t = today();
+    habits.forEach(function (h) {
+      var s = DayChain.summary(h, t);
+      var card = el('div', 'card');
+      var top = el('div', 'row');
+      var left = el('div');
+      left.appendChild(el('span', 'name', h.name));
+      var right = el('div', 'row');
+      var num = el('span', 'streak' + (s.current === 0 ? ' dead' : ''), String(s.current));
+      num.appendChild(el('span', 'unit', ' day' + (s.current === 1 ? '' : 's')));
+      right.appendChild(num);
+      if (s.checkedToday) right.appendChild(el('span', 'done', 'done today'));
+      else if (s.atRisk) right.appendChild(el('span', 'risk', 'at risk'));
+      top.appendChild(left); top.appendChild(right);
+      card.appendChild(top);
+      card.appendChild(el('div', 'meta', 'Longest ' + s.longest + ' - ' + s.total + ' total check-ins'));
+
+      var week = el('div', 'week');
+      for (var i = 6; i >= 0; i--) {
+        var d = minusDays(t, i);
+        var on = h.checkins.indexOf(d) >= 0;
+        var cell = el('div', 'day' + (on ? ' on' : ''));
+        var dot = el('div', 'dot', on ? '✓' : '');
+        cell.appendChild(dot);
+        cell.appendChild(el('div', null, i === 0 ? 'today' : DOW[new Date(d + 'T00:00:00Z').getUTCDay()]));
+        week.appendChild(cell);
+      }
+      card.appendChild(week);
+
+      var act = el('div', 'actions');
+      if (!s.checkedToday) {
+        var btn = el('button', null, 'Check in today');
+        btn.onclick = function () { DayChain.checkIn(h, t); save(); render(); };
+        act.appendChild(btn);
+      } else {
+        var undo = el('button', 'ghost', 'Undo today');
+        undo.onclick = function () { DayChain.uncheck(h, t); save(); render(); };
+        act.appendChild(undo);
+      }
+      var del = el('button', 'ghost', 'Remove');
+      del.onclick = function () {
+        if (!confirm('Remove "' + h.name + '" and its history?')) return;
+        DayChain.removeHabit(habits, h.id); save(); render();
+      };
+      act.appendChild(del);
+      card.appendChild(act);
+      wrap.appendChild(card);
+    });
+  }
+
+  document.getElementById('add-form').onsubmit = function (e) {
+    e.preventDefault();
+    try { DayChain.addHabit(habits, document.getElementById('f-name').value); }
+    catch (err) { alert(err.message); return; }
+    document.getElementById('f-name').value = '';
+    save(); render();
+  };
+  render();
+})();
+</script>
+</body>
+</html>
